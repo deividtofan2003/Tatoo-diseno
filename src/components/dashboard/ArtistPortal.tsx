@@ -2,7 +2,9 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import NumberField from '@/components/NumberField';
 import {
+  ChevronDown,
   Calendar,
   Clock,
   Sparkles,
@@ -68,6 +70,8 @@ export default function ArtistPortal({
   // Pricing Rules State
   const [minFee, setMinFee] = useState(60);
   const [hourlyRate, setHourlyRate] = useState(80);
+  const [pricingMode, setPricingMode] = useState<'hour' | 'session'>('hour');
+  const [sessionPrice, setSessionPrice] = useState<number>(250);
   const [smallPrice, setSmallPrice] = useState(60);
   const [mediumPrice, setMediumPrice] = useState(140);
   const [largePrice, setLargePrice] = useState(260);
@@ -91,6 +95,32 @@ export default function ArtistPortal({
   // Calendar View State: 'week' or 'month' (Google / Teams style)
   const [calendarView, setCalendarView] = useState<'week' | 'month'>('week');
   const [calendarDate, setCalendarDate] = useState<Date>(new Date());
+
+  // La agenda siempre parte del día de HOY: si la pestaña se queda abierta y cambia el día,
+  // vuelve sola a la fecha nueva (y el círculo de "hoy" se mueve al día correcto).
+  const todayKeyRef = useRef(new Date().toDateString());
+  const [, setTodayTick] = useState(0);
+  useEffect(() => {
+    const checkDay = () => {
+      const nowKey = new Date().toDateString();
+      if (nowKey !== todayKeyRef.current) {
+        todayKeyRef.current = nowKey;
+        setCalendarDate(new Date());
+        setTodayTick(t => t + 1);
+      }
+    };
+    const timer = setInterval(checkDay, 60 * 1000);
+    window.addEventListener('focus', checkDay);
+    document.addEventListener('visibilitychange', checkDay);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener('focus', checkDay);
+      document.removeEventListener('visibilitychange', checkDay);
+    };
+  }, []);
+
+  // Avisos de chats: último mensaje y última foto de curación de cada conversación
+  const [chatSignals, setChatSignals] = useState<Record<string, { lastSender?: string; healingStatus?: string; healingAt?: string }>>({});
 
   // Clear Chat Modal State
   const [showClearChatModal, setShowClearChatModal] = useState(false);
@@ -239,6 +269,8 @@ export default function ArtistPortal({
         const rules = art.pricing_rules || {};
         setMinFee(rules.minimum_fee ?? 60);
         setHourlyRate(rules.hourly_rate ?? 80);
+        setPricingMode(rules.pricing_mode === 'session' ? 'session' : 'hour');
+        setSessionPrice(rules.session_price ?? 250);
         setSmallPrice(rules.size_rates?.small?.base_price ?? 60);
         setMediumPrice(rules.size_rates?.medium?.base_price ?? 140);
         setLargePrice(rules.size_rates?.large?.base_price ?? 260);
@@ -284,6 +316,7 @@ export default function ArtistPortal({
           .order('updated_at', { ascending: false });
 
         setChats(chatList || []);
+        await loadChatSignals(chatList || []);
         if (chatList && chatList.length > 0) {
           selectChat(chatList[0]);
         }
@@ -301,6 +334,66 @@ export default function ArtistPortal({
     } finally {
       setLoading(false);
     }
+  };
+
+  // Lee los últimos mensajes de cada chat para saber quién habló el último y si hay foto de curación
+  const loadChatSignals = async (chatList: any[]) => {
+    const ids = (chatList || []).map((c: any) => c.id);
+    if (ids.length === 0) { setChatSignals({}); return; }
+    const { data: recent } = await supabase
+      .from('chat_messages')
+      .select('chat_id, sender_role, healing_status, created_at')
+      .in('chat_id', ids)
+      .order('created_at', { ascending: false })
+      .limit(400);
+    const signals: Record<string, { lastSender?: string; healingStatus?: string; healingAt?: string }> = {};
+    for (const m of recent || []) {
+      const s = signals[m.chat_id] || (signals[m.chat_id] = {});
+      if (!s.lastSender) s.lastSender = m.sender_role;
+      if (!s.healingStatus && m.healing_status) {
+        s.healingStatus = m.healing_status;
+        s.healingAt = m.created_at;
+      }
+    }
+    setChatSignals(signals);
+  };
+
+  // Refresca la lista de chats cada 30 s para que los avisos lleguen solos
+  useEffect(() => {
+    if (!artist?.id) return;
+    const refresh = async () => {
+      const { data: chatList } = await supabase
+        .from('chats')
+        .select(`
+          *,
+          clients (
+            id,
+            profiles (full_name, email, avatar_url)
+          )
+        `)
+        .eq('artist_id', artist.id)
+        .order('updated_at', { ascending: false });
+      if (chatList) {
+        setChats(chatList);
+        await loadChatSignals(chatList);
+      }
+    };
+    const timer = setInterval(refresh, 30 * 1000);
+    return () => clearInterval(timer);
+  }, [artist?.id]);
+
+  // ¿Este cliente necesita que el tatuador entre? (la IA se ha atascado, pide una persona o posible infección)
+  const chatNeedsAttention = (c: any) => {
+    const sig = chatSignals[c.id] || {};
+    if (sig.lastSender === 'artist') return false;
+    return c.status_badge === 'takeover' || sig.healingStatus === 'alert_infection';
+  };
+
+  const healingLabel = (status?: string) => {
+    if (status === 'alert_infection') return { text: 'Curación: posible infección', cls: 'chat-pill-red' };
+    if (status === 'redness_mild') return { text: 'Curación: revisar', cls: 'chat-pill-amber' };
+    if (status === 'normal') return { text: 'Curación: va bien', cls: 'chat-pill-green' };
+    return null;
   };
 
   const selectChat = async (chat: any) => {
@@ -369,6 +462,8 @@ export default function ArtistPortal({
     const updatedRules = {
       minimum_fee: Number(minFee),
       hourly_rate: Number(hourlyRate),
+      pricing_mode: pricingMode,
+      session_price: Number(sessionPrice),
       size_rates: {
         small: { max_cm: 5, base_price: Number(smallPrice) },
         medium: { max_cm: 15, base_price: Number(mediumPrice) },
@@ -558,7 +653,7 @@ export default function ArtistPortal({
       {/* Navigation Tabs */}
       <div className="flex flex-wrap gap-2 border-b border-white/10 mb-8 pb-3">
         <button
-          onClick={() => setActiveTab('calendar')}
+          onClick={() => { setActiveTab('calendar'); setCalendarDate(new Date()); }}
           className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-colors ${
             activeTab === 'calendar' ? 'bg-white/10 text-white' : 'text-ink-400 hover:text-white'
           }`}
@@ -587,6 +682,9 @@ export default function ArtistPortal({
         >
           <MessageSquare className="w-4 h-4 text-amber-400" />
           <span>Chats ({chats.length})</span>
+          {chats.filter(chatNeedsAttention).length > 0 && (
+            <span className="chat-tab-alert">{chats.filter(chatNeedsAttention).length}</span>
+          )}
         </button>
 
         <button
@@ -619,6 +717,52 @@ export default function ArtistPortal({
           <span>Galería y newsletter</span>
         </button>
       </div>
+
+      {/* Avisos para el tatuador: clientes que necesitan atención y fotos de curación */}
+      {(() => {
+        const urgent = chats.filter(chatNeedsAttention);
+        const healingNews = chats.filter((c: any) => {
+          const sig = chatSignals[c.id] || {};
+          return sig.healingStatus && sig.lastSender !== 'artist' && !chatNeedsAttention(c)
+            && sig.healingAt && (Date.now() - new Date(sig.healingAt).getTime()) < 48 * 60 * 60 * 1000;
+        });
+        // Los avisos solo salen en Conversaciones, no en la agenda ni en las demás pestañas
+        if (activeTab !== 'chats') return null;
+        if (urgent.length === 0 && healingNews.length === 0) return null;
+        return (
+          <div className="artist-alerts mb-6">
+            {urgent.slice(0, 3).map((c: any) => {
+              const sig = chatSignals[c.id] || {};
+              const name = c.clients?.profiles?.full_name || 'Un cliente';
+              const why = sig.healingStatus === 'alert_infection'
+                ? 'ha mandado una foto con posible infección'
+                : 'necesita que le atiendas tú';
+              return (
+                <button key={c.id} type="button" className="artist-alert artist-alert-red"
+                  onClick={() => { setActiveTab('chats'); selectChat(c); }}>
+                  <span className="artist-alert-dot" />
+                  <span><strong>{name}</strong> {why}</span>
+                  <span className="artist-alert-cta">Atender</span>
+                </button>
+              );
+            })}
+            {healingNews.slice(0, 3).map((c: any) => {
+              const sig = chatSignals[c.id] || {};
+              const name = c.clients?.profiles?.full_name || 'Un cliente';
+              const label = sig.healingStatus === 'redness_mild' ? 'algo enrojecido, conviene revisarlo' : 'va bien';
+              return (
+                <button key={c.id} type="button"
+                  className={`artist-alert ${sig.healingStatus === 'redness_mild' ? 'artist-alert-amber' : 'artist-alert-green'}`}
+                  onClick={() => { setActiveTab('chats'); selectChat(c); }}>
+                  <span className="artist-alert-dot" />
+                  <span><strong>{name}</strong> ha mandado foto de su tatuaje: {label}</span>
+                  <span className="artist-alert-cta">Ver</span>
+                </button>
+              );
+            })}
+          </div>
+        );
+      })()}
 
       {/* TAB 1: CALENDAR & APPOINTMENTS (GOOGLE / TEAMS STYLE) */}
       {activeTab === 'calendar' && (() => {
@@ -929,15 +1073,19 @@ export default function ArtistPortal({
           {/* Left Column: Chat list with AI 1-line summary descriptors */}
           <div className="glass-panel rounded-2xl border border-white/10 p-3 overflow-y-auto space-y-2">
             <h3 className="text-xs font-bold text-ink-400 uppercase tracking-wider px-2 py-1">Conversaciones</h3>
-            {chats.map((c) => {
+            {[...chats].sort((a: any, b: any) => Number(chatNeedsAttention(b)) - Number(chatNeedsAttention(a))).map((c) => {
               const clientName = c.clients?.profiles?.full_name || 'Cliente';
               const isSelected = selectedChat?.id === c.id;
+              const needsAttention = chatNeedsAttention(c);
+              const healing = healingLabel(chatSignals[c.id]?.healingStatus);
 
               return (
                 <div
                   key={c.id}
                   onClick={() => selectChat(c)}
                   className={`p-3 rounded-xl cursor-pointer transition-all border ${
+                    needsAttention ? 'chat-card-alert ' : ''
+                  }${
                     isSelected
                       ? 'bg-crimson-600/15 border-crimson-500/40 text-white'
                       : 'bg-ink-900/60 border-white/5 text-ink-300 hover:bg-white/5'
@@ -956,6 +1104,16 @@ export default function ArtistPortal({
                   <p className="text-xs text-amber-300/90 font-medium line-clamp-2">
                     ✨ {c.ai_summary || 'Consulta en curso...'}
                   </p>
+
+                  {/* Estado para el tatuador: rojo si hay que atender, verde si va bien */}
+                  <div className="flex flex-wrap gap-1.5 mt-2">
+                    {needsAttention ? (
+                      <span className="chat-pill chat-pill-red">Atiende a este cliente</span>
+                    ) : (
+                      <span className="chat-pill chat-pill-green">Va bien</span>
+                    )}
+                    {healing && <span className={`chat-pill ${healing.cls}`}>{healing.text}</span>}
+                  </div>
                 </div>
               );
             })}
@@ -1086,8 +1244,7 @@ export default function ArtistPortal({
                 <label className="block text-xs font-semibold text-ink-300 uppercase tracking-wider mb-1.5">
                   Tarifa Mínima de Apertura (€)
                 </label>
-                <input
-                  type="number"
+                <NumberField
                   value={minFee}
                   onChange={(e) => setMinFee(Number(e.target.value))}
                   className="w-full px-4 py-2.5 rounded-xl bg-ink-900 border border-white/10 text-white focus:outline-none focus:border-crimson-500"
@@ -1095,15 +1252,34 @@ export default function ArtistPortal({
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-ink-300 uppercase tracking-wider mb-1.5">
-                  Precio por Hora (€)
+                {/* Desplegable: el tatuador elige si cobra por hora o por sesión */}
+                <label className="pricing-select mb-1.5" title="Elige si cobras por hora o por sesión">
+                  <select
+                    value={pricingMode}
+                    onChange={(e) => setPricingMode(e.target.value === 'session' ? 'session' : 'hour')}
+                    aria-label="Cómo cobras"
+                  >
+                    <option value="hour">Precio por Hora (€)</option>
+                    <option value="session">Precio por Sesión (€)</option>
+                  </select>
+                  <ChevronDown className="w-3.5 h-3.5" />
                 </label>
-                <input
-                  type="number"
-                  value={hourlyRate}
-                  onChange={(e) => setHourlyRate(Number(e.target.value))}
-                  className="w-full px-4 py-2.5 rounded-xl bg-ink-900 border border-white/10 text-white focus:outline-none focus:border-crimson-500"
-                />
+                {pricingMode === 'hour' ? (
+                  <NumberField
+                    value={hourlyRate}
+                    onChange={(e) => setHourlyRate(Number(e.target.value))}
+                    className="w-full px-4 py-2.5 rounded-xl bg-ink-900 border border-white/10 text-white focus:outline-none focus:border-crimson-500"
+                  />
+                ) : (
+                  <NumberField
+                    value={sessionPrice}
+                    onChange={(e) => setSessionPrice(Number(e.target.value))}
+                    className="w-full px-4 py-2.5 rounded-xl bg-ink-900 border border-white/10 text-white focus:outline-none focus:border-crimson-500"
+                  />
+                )}
+                {pricingMode === 'session' && (
+                  <p className="text-[11px] text-ink-400 mt-1.5">La IA dará este precio por sesión. Cuántas sesiones hacen falta lo decides tú al ver el diseño.</p>
+                )}
               </div>
             </div>
 
@@ -1112,8 +1288,7 @@ export default function ArtistPortal({
               <div className="grid grid-cols-3 gap-3">
                 <div>
                   <label className="block text-xs text-ink-400 mb-1">Pequeño (&lt;5cm)</label>
-                  <input
-                    type="number"
+                  <NumberField
                     value={smallPrice}
                     onChange={(e) => setSmallPrice(Number(e.target.value))}
                     className="w-full px-3 py-2 rounded-xl bg-ink-900 border border-white/10 text-white"
@@ -1121,8 +1296,7 @@ export default function ArtistPortal({
                 </div>
                 <div>
                   <label className="block text-xs text-ink-400 mb-1">Medio (5-15cm)</label>
-                  <input
-                    type="number"
+                  <NumberField
                     value={mediumPrice}
                     onChange={(e) => setMediumPrice(Number(e.target.value))}
                     className="w-full px-3 py-2 rounded-xl bg-ink-900 border border-white/10 text-white"
@@ -1130,8 +1304,7 @@ export default function ArtistPortal({
                 </div>
                 <div>
                   <label className="block text-xs text-ink-400 mb-1">Grande (&gt;15cm)</label>
-                  <input
-                    type="number"
+                  <NumberField
                     value={largePrice}
                     onChange={(e) => setLargePrice(Number(e.target.value))}
                     className="w-full px-3 py-2 rounded-xl bg-ink-900 border border-white/10 text-white"
@@ -1144,8 +1317,7 @@ export default function ArtistPortal({
               <label className="block text-xs font-semibold text-ink-300 uppercase tracking-wider mb-1.5">
                 Multiplicador por Color (Ej: 1.25 = +25%)
               </label>
-              <input
-                type="number"
+              <NumberField
                 step="0.05"
                 value={colorMultiplier}
                 onChange={(e) => setColorMultiplier(Number(e.target.value))}
@@ -1251,8 +1423,7 @@ export default function ArtistPortal({
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-ink-300 uppercase tracking-wider mb-1.5">Precio orientativo (€)</label>
-                  <input
-                    type="number"
+                  <NumberField
                     value={sharePriceHint}
                     onChange={(e) => setSharePriceHint(e.target.value)}
                     placeholder="Ej: 120"

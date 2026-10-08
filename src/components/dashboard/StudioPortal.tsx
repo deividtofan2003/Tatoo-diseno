@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
+import NumberField from '@/components/NumberField';
 import ArtistPortal from '@/components/dashboard/ArtistPortal';
 import {
   Users,
@@ -925,8 +926,7 @@ export default function StudioPortal({ user, profile }: { user: any; profile: an
                 </div>
                 <div>
                   <label className="block text-xs text-amber-300 mb-1">% de Descuento</label>
-                  <input
-                    type="number"
+                  <NumberField
                     value={discountPercent}
                     onChange={(e) => setDiscountPercent(Number(e.target.value))}
                     className="w-full px-3 py-2 rounded-xl bg-ink-950 border border-white/10 text-white text-xs"
@@ -1152,8 +1152,7 @@ export default function StudioPortal({ user, profile }: { user: any; profile: an
                   <label className="block font-semibold text-ink-300 uppercase tracking-wider mb-1">
                     Tarifa Mínima (€)
                   </label>
-                  <input
-                    type="number"
+                  <NumberField
                     value={newArtistMinFee}
                     onChange={(e) => setNewArtistMinFee(Number(e.target.value))}
                     className="w-full px-3 py-2 rounded-xl bg-ink-900 border border-white/10 text-white text-sm"
@@ -1163,8 +1162,7 @@ export default function StudioPortal({ user, profile }: { user: any; profile: an
                   <label className="block font-semibold text-ink-300 uppercase tracking-wider mb-1">
                     Precio / Hora (€)
                   </label>
-                  <input
-                    type="number"
+                  <NumberField
                     value={newArtistHourlyRate}
                     onChange={(e) => setNewArtistHourlyRate(Number(e.target.value))}
                     className="w-full px-3 py-2 rounded-xl bg-ink-900 border border-white/10 text-white text-sm"
@@ -1251,8 +1249,7 @@ export default function StudioPortal({ user, profile }: { user: any; profile: an
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block font-semibold text-ink-300 uppercase tracking-wider mb-1">Tarifa Mínima (€) *</label>
-                  <input
-                    type="number"
+                  <NumberField
                     required
                     min={20}
                     value={editMinFee}
@@ -1262,8 +1259,7 @@ export default function StudioPortal({ user, profile }: { user: any; profile: an
                 </div>
                 <div>
                   <label className="block font-semibold text-ink-300 uppercase tracking-wider mb-1">Precio por Hora (€) *</label>
-                  <input
-                    type="number"
+                  <NumberField
                     required
                     min={20}
                     value={editHourlyRate}

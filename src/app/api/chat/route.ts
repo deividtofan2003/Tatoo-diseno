@@ -413,6 +413,12 @@ Transparencia: Recuerda que ${artistName} supervisa este chat y puede intervenir
       if (executedToolResult?.healingData) newBadge = executedToolResult.healingData.healing_status === 'alert_infection' ? 'takeover' : 'healing_check';
       if (toolExecutedName === 'request_human_takeover') newBadge = 'takeover';
 
+      // La IA se atasca: no entiende dos veces seguidas, o el cliente se desespera / pide una persona
+      const aiConfusedNow = /no he terminado de entender/i.test(finalReplyText);
+      const aiConfusedBefore = compressed.slice(-4).some(m => m.role === 'assistant' && typeof m.content === 'string' && /no he terminado de entender/i.test(m.content));
+      const clientFrustrated = /no me entiendes|no entiendes nada|no me est[aá]s entendiendo|no me sirve|me est[aá]s liando|ya te lo he dicho|hablar con (una persona|alguien|el tatuador|un humano)/i.test(content || '');
+      if ((aiConfusedNow && aiConfusedBefore) || clientFrustrated) newBadge = 'takeover';
+
       const updatedHistory: ChatMessage[] = [...compressed, { role: 'assistant', content: finalReplyText }];
       const chatSummary = await generateChatSummary(updatedHistory, lang as 'es' | 'en');
 

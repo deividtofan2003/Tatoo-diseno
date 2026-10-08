@@ -1282,6 +1282,28 @@ export async function executeAiTool(
           complex_placement_multiplier: 1.15
         };
 
+        // Si el tatuador cobra POR SESIÓN, la IA da el precio de la sesión
+        if ((pricingRules as any).pricing_mode === 'session' && Number((pricingRules as any).session_price) > 0) {
+          const sessionPrice = Number((pricingRules as any).session_price);
+          const sessionQuote = {
+            pricing_mode: 'session',
+            session_price: sessionPrice,
+            estimated_min: sessionPrice,
+            estimated_max: sessionPrice,
+            size_cm: sizeCm,
+            is_color: isColor,
+            is_complex_placement: isComplex,
+            disclaimer: 'Precio por sesión. El número de sesiones lo decide el tatuador al ver el diseño.'
+          };
+          return {
+            success: true,
+            tool: 'estimate_quote',
+            result: sessionQuote,
+            quoteData: sessionQuote,
+            displayText: `${context.artistName || 'El tatuador'} trabaja por sesión: **${sessionPrice}€ cada sesión**. Cuántas sesiones necesita tu pieza de ${sizeCm} cm lo valora él al ver el diseño.`
+          };
+        }
+
         const quoteResult = calculateQuote(pricingRules, {
           size_cm: sizeCm,
           is_color: isColor,

@@ -1581,7 +1581,7 @@ export default function ClientPortal({ user, profile }: { user: any; profile: an
                         {msg.quote_data && (
                           <div className="mt-3 p-3 rounded-xl bg-black/40 border border-amber-500/30 text-xs space-y-1">
                             <div className="font-bold text-amber-400 flex items-center gap-1">
-                              <span>💰 Estimación: {msg.quote_data.estimated_min}€ - {msg.quote_data.estimated_max}€</span>
+                              <span>💰 {msg.quote_data.pricing_mode === 'session' ? `Precio por sesión: ${msg.quote_data.session_price}€` : `Estimación: ${msg.quote_data.estimated_min}€ - ${msg.quote_data.estimated_max}€`}</span>
                             </div>
                             <p className="text-[11px] text-ink-400">{msg.quote_data.disclaimer}</p>
                           </div>
